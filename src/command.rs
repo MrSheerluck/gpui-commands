@@ -1,5 +1,9 @@
 use gpui::{Action, App, SharedString, Window};
 
+/// The signature of a command handler: invoked with the window and app
+/// contexts whenever the command is executed.
+type CommandHandler = dyn Fn(&mut Window, &mut App);
+
 /// A single command: its display name, category, underlying GPUI action,
 /// optional keybinding, and the handler invoked when it is executed.
 pub struct Command {
@@ -7,7 +11,7 @@ pub struct Command {
     pub(crate) action: Box<dyn Action>,
     pub(crate) category: SharedString,
     pub(crate) keybinding: Option<SharedString>,
-    pub(crate) handler: Option<Box<dyn Fn(&mut Window, &mut App)>>,
+    pub(crate) handler: Option<Box<CommandHandler>>,
 }
 
 impl Command {
