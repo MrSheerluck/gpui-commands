@@ -1,5 +1,5 @@
 use crate::Command;
-use gpui::{App, DummyKeyboardMapper, KeyBinding};
+use gpui::{App, DummyKeyboardMapper, Global, KeyBinding};
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -9,6 +9,8 @@ pub struct CommandRegistry {
     commands: Vec<Command>,
     by_action_type: HashMap<TypeId, ()>,
 }
+
+impl Global for CommandRegistry {}
 
 impl CommandRegistry {
     /// Create an empty registry.
