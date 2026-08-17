@@ -12,10 +12,10 @@
 //!   cmd-shift-f      Format Document
 
 use gpui::{
-    actions, App, Application, Bounds, Context, FocusHandle, Focusable, Render, SharedString,
-    Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
+    actions, App, Application, Bounds, Context, Entity, FocusHandle, Focusable, Render,
+    SharedString, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
 };
-use gpui_commands::{Command, CommandRegistry};
+use gpui_commands::{Command, CommandPalette, CommandRegistry};
 
 actions!(demo, [AddItem, DeleteItem, ToggleSidebar, SaveFile, FormatDocument]);
 
@@ -245,15 +245,25 @@ fn main() {
 
         let mut registry = CommandRegistry::new();
 
+        // Grab the demo view's entity handle and hand a clone to each command
+        // handler. Handlers are invoked from the palette during event
+        // dispatch, so they update the entity directly rather than calling
+        // `window.update`, which would re-enter the dispatch in progress.
+        let demo: Entity<DemoApp> = window
+            .update(cx, |view, window, cx| {
+                window.focus(&view.focus_handle(cx));
+                cx.activate(true);
+                cx.entity()
+            })
+            .unwrap();
+
         registry.register(
             Command::new("Add Item", AddItem)
                 .category("Edit")
                 .keybinding("cmd-enter")
                 .handler({
-                    let window = window.clone();
-                    move |_, cx| {
-                        window.update(cx, |view, _, cx| view.add_item(cx)).unwrap();
-                    }
+                    let demo = demo.clone();
+                    move |_, cx| demo.update(cx, |view, cx| view.add_item(cx))
                 }),
         );
 
@@ -262,10 +272,8 @@ fn main() {
                 .category("Edit")
                 .keybinding("cmd-backspace")
                 .handler({
-                    let window = window.clone();
-                    move |_, cx| {
-                        window.update(cx, |view, _, cx| view.delete_item(cx)).unwrap();
-                    }
+                    let demo = demo.clone();
+                    move |_, cx| demo.update(cx, |view, cx| view.delete_item(cx))
                 }),
         );
 
@@ -274,10 +282,8 @@ fn main() {
                 .category("View")
                 .keybinding("cmd-b")
                 .handler({
-                    let window = window.clone();
-                    move |_, cx| {
-                        window.update(cx, |view, _, cx| view.toggle_sidebar(cx)).unwrap();
-                    }
+                    let demo = demo.clone();
+                    move |_, cx| demo.update(cx, |view, cx| view.toggle_sidebar(cx))
                 }),
         );
 
@@ -286,10 +292,8 @@ fn main() {
                 .category("File")
                 .keybinding("cmd-s")
                 .handler({
-                    let window = window.clone();
-                    move |_, cx| {
-                        window.update(cx, |view, _, cx| view.save_file(cx)).unwrap();
-                    }
+                    let demo = demo.clone();
+                    move |_, cx| demo.update(cx, |view, cx| view.save_file(cx))
                 }),
         );
 
@@ -298,23 +302,17 @@ fn main() {
                 .category("Edit")
                 .keybinding("cmd-shift-f")
                 .handler({
-                    let window = window.clone();
-                    move |_, cx| {
-                        window.update(cx, |view, _, cx| view.format_document(cx)).unwrap();
-                    }
+                    let demo = demo.clone();
+                    move |_, cx| demo.update(cx, |view, cx| view.format_document(cx))
                 }),
         );
 
         // One call binds every registered keybinding with GPUI.
         registry.install_keybindings(cx);
 
-        // Give the root view focus so keybindings dispatch to its on_action
-        // handlers, and activate the app.
-        window
-            .update(cx, |view, window, cx| {
-                window.focus(&view.focus_handle(cx));
-                cx.activate(true);
-            })
-            .unwrap();
+        // Install the palette (call after the window exists): it takes over
+        // the window's root view, rendering the app beneath it. Press
+        // cmd-shift-p to open it.
+        CommandPalette::install(registry, cx);
     });
 }

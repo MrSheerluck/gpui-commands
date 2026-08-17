@@ -7,3 +7,6 @@ description = "Unified action registration, keybinding, and command palette for 
 
 [dependencies]
 gpui = "0.2"
+
+[dev-dependencies]
+gpui = { version = "0.2", features = ["test-support"] }

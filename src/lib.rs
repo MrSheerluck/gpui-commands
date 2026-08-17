@@ -4,7 +4,9 @@
 //! searchable command palette for every command an application supports.
 
 mod command;
+mod palette;
 mod registry;
 
 pub use command::Command;
+pub use palette::CommandPalette;
 pub use registry::CommandRegistry;
