@@ -343,7 +343,7 @@ fn filtered_commands<'a>(commands: &'a [&'a Command], query: &str) -> Vec<(&'a C
             fuzzy_match(query, command.name().as_str()).map(|score| (*command, score))
         })
         .collect();
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
     scored
 }
 
