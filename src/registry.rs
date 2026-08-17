@@ -1,4 +1,5 @@
 use crate::Command;
+use gpui::{App, DummyKeyboardMapper, KeyBinding};
 use std::any::TypeId;
 use std::collections::HashMap;
 
@@ -41,6 +42,41 @@ impl CommandRegistry {
     /// All registered commands, in registration order.
     pub fn commands(&self) -> &[Command] {
         &self.commands
+    }
+
+    /// Register every command's keybinding with GPUI. Commands without a
+    /// keybinding are skipped. Call this once, after all registrations.
+    ///
+    /// # Panics
+    ///
+    /// If any keybinding string fails to parse.
+    pub fn install_keybindings(&self, cx: &mut App) {
+        let bindings: Vec<KeyBinding> = self
+            .commands
+            .iter()
+            .filter_map(|command| {
+                let binding = command.binding()?;
+                let action = command.action().boxed_clone();
+                Some(
+                    KeyBinding::load(
+                        binding.as_str(),
+                        action,
+                        None,
+                        false,
+                        None,
+                        &DummyKeyboardMapper,
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "invalid keybinding `{}` for command `{}`: {error}",
+                            binding,
+                            command.name()
+                        )
+                    }),
+                )
+            })
+            .collect();
+        cx.bind_keys(bindings);
     }
 }
 
