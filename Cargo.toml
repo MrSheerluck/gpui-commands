@@ -1,0 +1,9 @@
+[package]
+name = "gpui-commands"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Unified action registration, keybinding, and command palette for GPUI"
+
+[dependencies]
+gpui = "0.2"
