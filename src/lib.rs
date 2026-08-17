@@ -4,6 +4,7 @@
 //! searchable command palette for every command an application supports.
 
 mod command;
+mod fuzzy;
 mod palette;
 mod registry;
 
