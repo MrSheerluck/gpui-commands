@@ -1,6 +1,7 @@
 //! The command palette: a searchable overlay listing every registered
 //! command, opened by a configurable trigger keybinding.
 
+use crate::fuzzy::fuzzy_match;
 use crate::{Command, CommandRegistry};
 use gpui::{
     actions, point, App, AnyView, Bounds, Context, Entity, FocusHandle, Focusable, KeyBinding,
@@ -94,7 +95,7 @@ impl CommandPalette {
     }
 
     fn move_selection(&mut self, delta: isize, cx: &mut Context<Self>) {
-        let count = cx.global::<CommandRegistry>().commands().len();
+        let count = self.filtered_count(cx);
         if count == 0 {
             return;
         }
@@ -103,13 +104,26 @@ impl CommandPalette {
         cx.notify();
     }
 
+    fn filtered_count(&self, cx: &Context<Self>) -> usize {
+        let commands = cx.global::<CommandRegistry>().commands().iter().collect::<Vec<_>>();
+        filtered_commands(&commands, self.query.as_str()).len()
+    }
+
     fn execute_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        cx.update_global::<CommandRegistry, _>(|registry, cx| {
-            if let Some(command) = registry.commands().get(self.selected_index) {
-                command.run(window, cx);
+        let executed = cx.update_global::<CommandRegistry, bool>(|registry, cx| {
+            let commands = registry.commands().iter().collect::<Vec<_>>();
+            let filtered = filtered_commands(&commands, self.query.as_str());
+            match filtered.get(self.selected_index) {
+                Some((command, _)) => {
+                    command.run(window, cx);
+                    true
+                }
+                None => false,
             }
         });
-        self.close(window, cx);
+        if executed {
+            self.close(window, cx);
+        }
     }
 
     fn select_and_execute(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
@@ -126,6 +140,7 @@ impl CommandPalette {
                     let mut text = self.query.to_string();
                     text.pop();
                     self.query = text.into();
+                    self.selected_index = 0;
                     cx.notify();
                 }
             }
@@ -142,6 +157,7 @@ impl CommandPalette {
                     let mut text = self.query.to_string();
                     text.push_str(char);
                     self.query = text.into();
+                    self.selected_index = 0;
                     cx.notify();
                 }
             }
@@ -171,6 +187,7 @@ impl Render for CommandPalette {
                 .commands()
                 .iter()
                 .collect::<Vec<_>>();
+            let filtered = filtered_commands(&commands, self.query.as_str());
 
             let window_bounds = window.bounds();
             let width = f32::from(window_bounds.size.width);
@@ -215,7 +232,7 @@ impl Render for CommandPalette {
                         .justify_center()
                         .items_start()
                         .pt(px(96.0))
-                        .child(card(&entity, &focus, &query, &commands, selected)),
+                        .child(card(&entity, &focus, &query, &filtered, selected)),
                 )
                 .into_any_element()
         } else {
@@ -238,13 +255,15 @@ fn card(
     entity: &Entity<CommandPalette>,
     focus: &FocusHandle,
     query: &SharedString,
-    commands: &[&Command],
+    filtered: &[(&Command, i32)],
     selected: usize,
 ) -> impl IntoElement {
     let entity = entity.clone();
     let key_entity = entity.clone();
     let focus = focus.clone();
     let query = query.clone();
+    let query_empty = query.is_empty();
+    let empty_query = query.clone();
 
     div()
         .flex()
@@ -276,7 +295,7 @@ fn card(
                                 palette.handle_key(event, window, cx)
                             });
                         })
-                        .child(if query.is_empty() {
+                        .child(if query_empty {
                             div()
                                 .text_color(rgb(0x6c7086))
                                 .child("Search commands…")
@@ -292,13 +311,40 @@ fn card(
                 .flex_col()
                 .flex_1()
                 .overflow_y_scroll()
+                .when(filtered.is_empty() && !query_empty, {
+                    let query = empty_query;
+                    move |this| {
+                        this.child(
+                            div()
+                                .px_3()
+                                .py_2()
+                                .text_color(rgb(0x6c7086))
+                                .child(format!("No commands match \"{query}\"")),
+                        )
+                    }
+                })
                 .children(
-                    commands
+                    filtered
                         .iter()
                         .enumerate()
-                        .map(|(index, command)| command_row(&entity, command, index, selected)),
+                        .map(|(index, (command, _))| command_row(&entity, command, index, selected)),
                 ),
         )
+}
+
+/// Filter and rank commands by the palette query, best match first.
+fn filtered_commands<'a>(commands: &'a [&'a Command], query: &str) -> Vec<(&'a Command, i32)> {
+    if query.is_empty() {
+        return commands.iter().map(|command| (*command, 0)).collect();
+    }
+    let mut scored: Vec<_> = commands
+        .iter()
+        .filter_map(|command| {
+            fuzzy_match(query, command.name().as_str()).map(|score| (*command, score))
+        })
+        .collect();
+    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored
 }
 
 fn command_row(
@@ -498,5 +544,40 @@ mod tests {
             "enter did not run the selected command's handler"
         );
         assert!(!palette_open(cx, handle), "enter did not close the palette");
+    }
+
+    #[gpui::test]
+    fn typing_filters_and_enter_executes_match(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, cx| Placeholder::new(cx));
+        window
+            .update(cx, |view, window, cx| {
+                window.focus(&view.focus_handle(cx));
+            })
+            .unwrap();
+        let handle: gpui::AnyWindowHandle = window.into();
+
+        let ping_count = std::rc::Rc::new(std::cell::RefCell::new(0));
+        let pong_count = std::rc::Rc::new(std::cell::RefCell::new(0));
+
+        cx.update(|cx| {
+            let mut registry = CommandRegistry::new();
+            registry.register(Command::new("Ping", PingPalette).handler({
+                let counter = ping_count.clone();
+                move |_, _| *counter.borrow_mut() += 1
+            }));
+            registry.register(Command::new("Pong", PongPalette).handler({
+                let counter = pong_count.clone();
+                move |_, _| *counter.borrow_mut() += 1
+            }));
+            CommandPalette::install(registry, cx);
+        });
+
+        cx.simulate_keystrokes(handle, "cmd-shift-p");
+        cx.simulate_keystrokes(handle, "p o n g");
+        cx.simulate_keystrokes(handle, "enter");
+
+        assert_eq!(*ping_count.borrow(), 0, "filtered-out command was executed");
+        assert_eq!(*pong_count.borrow(), 1, "matching command was not executed");
+        assert!(!palette_open(cx, handle), "palette did not close after executing");
     }
 }
